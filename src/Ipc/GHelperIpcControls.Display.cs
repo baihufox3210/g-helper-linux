@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GHelper.Linux.Display;
+using GHelper.Linux.Helpers;
 
 namespace GHelper.Linux.Ipc;
 
@@ -24,11 +25,48 @@ public sealed partial class GHelperIpcControls
         if (!RefreshSupported) throw Unsupported("No native display refresh backend for this session");
         var d = App.Display!;
         if (!d.GetAvailableRefreshRates().Contains(hz)) throw new IpcException("invalid_request", "Refresh rate is not advertised by the current panel");
-        d.SetRefreshRate(hz);
-        var result = Display();
-        result["state"] = d.GetRefreshRate() == hz ? "applied" : "failed";
-        return result;
+        AppConfig.Set("screen_auto", 0);
+        try
+        {
+            d.SetRefreshRate(hz);
+            var result = Display();
+            result["state"] = d.GetRefreshRate() == hz ? "applied" : "failed";
+            return result;
+        }
+        finally { RefreshScreenUi(); }
     }
+    private static JsonObject DisplayAuto()
+    {
+        if (!RefreshSupported || App.Current is not App)
+            throw Unsupported("Automatic display refresh control unavailable");
+        return new JsonObject
+        {
+            ["enabled"] = AppConfig.Is("screen_auto"),
+            ["onAc"] = App.Power is { } power ? JsonValue.Create(power.IsOnAcPower()) : null,
+            ["currentHz"] = Known(App.Display!.GetRefreshRate())
+        };
+    }
+
+    private static JsonObject SetDisplayAuto(bool enabled)
+    {
+        if (!RefreshSupported || App.Current is not App app)
+            throw Unsupported("Automatic display refresh control unavailable");
+        AppConfig.Set("screen_auto", enabled ? 1 : 0);
+        // ExecuteAsync runs this on a worker. AutoScreen remains the only policy owner.
+        // Disabling must not call AutoScreen or issue any display/overdrive writes.
+        try
+        {
+            bool applied = !enabled || app.AutoScreen();
+            var result = DisplayAuto();
+            result["state"] = applied ? "applied" : "failed";
+            return result;
+        }
+        finally { RefreshScreenUi(); }
+    }
+
+    private static void RefreshScreenUi() => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        App.MainWindowInstance?.RefreshScreenPublic());
+
     private static JsonObject SetBrightness(int percent)
     {
         if (App.Display is not LinuxDisplayControl { HasBacklight: true } d) throw Unsupported("Backlight unavailable");

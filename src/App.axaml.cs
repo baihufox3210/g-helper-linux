@@ -645,7 +645,9 @@ public class App : Application
     /// AC → max refresh + overdrive ON, Battery → 60Hz + overdrive OFF.
     /// Called on power state change, at startup, and when user enables auto mode.
     /// </summary>
-    public void AutoScreen(bool init = false)
+    /// <returns>Whether the selected refresh rate was observed after applying Auto.
+    /// Does not verify Panel Overdrive writes.</returns>
+    public bool AutoScreen(bool init = false)
     {
         if (!AppConfig.Is("screen_auto"))
         {
@@ -653,20 +655,22 @@ public class App : Application
             int saved = AppConfig.Get("panel_od", -1);
             if (saved >= 0)
                 Wmi?.SetPanelOverdrive(saved == 1);
-            return;
+            return false;
         }
 
         var display = Display;
         if (display == null)
-            return;
+            return false;
 
         var rates = display.GetAvailableRefreshRates();
         bool onAc = Power?.IsOnAcPower() ?? true;
 
+        int targetHz;
         if (onAc)
         {
             int maxHz = rates.Count > 0 ? rates.Max() : 0;
-            if (maxHz <= 0) return;
+            if (maxHz <= 0) return false;
+            targetHz = maxHz;
             display.SetRefreshRate(maxHz);
             Wmi?.SetPanelOverdrive(true);
             AppConfig.Set("panel_od", 1);
@@ -677,7 +681,8 @@ public class App : Application
         else
         {
             int lowHz = rates.Contains(60) ? 60 : (rates.Count > 0 ? rates.Min() : 0);
-            if (lowHz <= 0) return;
+            if (lowHz <= 0) return false;
+            targetHz = lowHz;
             display.SetRefreshRate(lowHz);
             Wmi?.SetPanelOverdrive(false);
             AppConfig.Set("panel_od", 0);
@@ -688,6 +693,7 @@ public class App : Application
 
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             MainWindowInstance?.RefreshScreenPublic());
+        return display.GetRefreshRate() == targetHz;
     }
 
 

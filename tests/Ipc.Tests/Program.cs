@@ -36,6 +36,25 @@ foreach (var (request, error) in new[]
     Check(response["ok"]!.GetValue<bool>() == false && response["error"]!["code"]!.GetValue<string>() == error, request);
     Check(fake.Calls == calls, "Validation must precede dispatch");
 }
+// Auto accepts only an explicit JSON boolean, with no extra fields.
+foreach (string parameters in new[] { "{}", "{\"enabled\":null}", "{\"enabled\":1}",
+    "{\"enabled\":0}", "{\"enabled\":\"true\"}", "{\"enabled\":[]}", "{\"enabled\":{}}",
+    "{\"enabled\":true,\"hz\":60}", "{\"enabled\":true,\"enabled\":false}" })
+{
+    int calls = fake.Calls;
+    var response = await Request("{\"method\":\"display.auto.set\",\"params\":" + parameters + "}");
+    Check(response["error"]!["code"]!.GetValue<string>() == "invalid_request", "Auto parameter validation: " + parameters);
+    Check(fake.Calls == calls, "Invalid Auto request never dispatched");
+}
+Check((await Request("{\"method\":\"display.auto.get\",\"params\":{\"enabled\":true}}"))["error"]!["code"]!.GetValue<string>() == "invalid_request", "Auto get takes no parameters");
+foreach (bool enabled in new[] { true, false })
+{
+    await Request(new JsonObject { ["method"] = "display.auto.set", ["params"] = new JsonObject { ["enabled"] = enabled } }.ToJsonString());
+    Check(fake.Method == "display.auto.set" && fake.Parameters!["enabled"]!.GetValue<bool>() == enabled, "Auto boolean forwarded");
+}
+await Request("{\"method\":\"display.auto.get\"}");
+Check(fake.Method == "display.auto.get", "Auto query registered");
+
 foreach (var mode in new[] { "silent", "balanced", "turbo" })
 {
     var response = await Request("profile-" + mode);
@@ -59,6 +78,13 @@ var pending = Request("profile-silent");
 Check((await Request("profile-turbo"))["error"]!["code"]!.GetValue<string>() == "busy", "Concurrent changes rejected");
 fake.Gate.SetResult();
 await pending;
+fake.Gate = null;
+fake.Gate = new TaskCompletionSource();
+var pendingAuto = Request("{\"method\":\"display.auto.set\",\"params\":{\"enabled\":true}}");
+Check((await Request("{\"method\":\"display.auto.get\"}"))["error"]!["code"]!.GetValue<string>() == "busy", "Auto polling cannot race IPC transition");
+Check((await Request("{\"method\":\"display.set\",\"params\":{\"hz\":60}}"))["error"]!["code"]!.GetValue<string>() == "busy", "Manual IPC change cannot race Auto transition");
+fake.Gate.SetResult();
+await pendingAuto;
 fake.Gate = null;
 
 // Real Unix socket + mocked controls. No App or hardware controller is loaded.
@@ -120,6 +146,7 @@ finally
     Directory.Delete(runtime, true);
 }
 await AdapterChecks.Run(Check);
+await DisplayAutoChecks.Run(Check);
 Console.WriteLine($"PASS: {checks} IPC checks (no hardware access)");
 
 sealed class MockControls : IIpcControls

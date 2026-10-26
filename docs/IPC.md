@@ -45,7 +45,9 @@ Hardware work runs off the UI thread. In-flight hardware operations are not canc
 | `gpu.get` | none | Current mode, configured target, supported modes, switch-in-progress and reboot flags |
 | `gpu.set` | `mode`: `eco`, `standard`, `optimized`, `ultimate` | Uses normal safe controller workflow; unsupported modes rejected before writes |
 | `display.get` | none | `scope:primary_panel`, name, current integer Hz, advertised integer Hz array, brightness; no per-display enumeration |
-| `display.set` | `hz`: integer 1–1000 | Must also appear in backend's current advertised rates; readback determines `applied` or `failed` |
+| `display.set` | `hz`: integer 1–1000 | Must also appear in backend's current advertised rates; disables `screen_auto` before attempting the manual change; readback determines `applied` or `failed` |
+| `display.auto.get` | none | `enabled` (saved `screen_auto`), `onAc` (boolean or null), `currentHz` (integer or null); requires native refresh control and the running App |
+| `display.auto.set` | `enabled`: JSON boolean | Saves `screen_auto`; enabling immediately delegates to `App.AutoScreen()`; disabling preserves refresh and overdrive; returns Auto status plus `state:applied` or `failed` |
 | `display.brightness.set` | `percent`: integer 4–100 | Existing backlight controller preserves minimum; `completed` plus observed brightness (hardware quantization may differ) |
 | `battery.get` | none | Percentage, AC state, observed charge limit, saved limit, temporary full-charge override |
 | `battery.set` | `limit`: integer 40–100 | Existing model-specific normalization and persistence; write result and hardware readback determine `applied`/`failed` |
@@ -72,6 +74,33 @@ Battery limits can be normalized by firmware (e.g. 60/80/100). Results contain r
 
 Refresh capability means a native backend exists, not a guarantee that a particular mode change will succeed. Existing APIs report rounded integer Hz and only the selected panel. External displays, fractional rates, arbitrary connectors, and all-display enumeration are unsupported. On Wayland, an XWayland xrandr fallback is rejected even for queries. Niri without a successfully probed native backend returns `unsupported`; this implementation adds no Niri-specific commands.
 
+### Automatic panel refresh
+
+`capabilities.get` includes `displayAuto` (boolean) and lists `display.auto.get` / `display.auto.set` in `methods`. `displayAuto` requires the running App and the same native display backend as `displayRefresh`; it does not guarantee a successful modeset. Missing display/backend, unavailable App, or an XWayland-only fallback returns `unsupported` for both Auto methods before changing any settings.
+
+```json
+{"version":1,"id":"auto-status","method":"display.auto.get"}
+{"version":1,"id":"auto-status","ok":true,"result":{"enabled":false,"onAc":true,"currentHz":60}}
+```
+
+```json
+{"version":1,"id":"auto-on","method":"display.auto.set","params":{"enabled":true}}
+{"version":1,"id":"auto-on","ok":true,"result":{"enabled":true,"onAc":true,"currentHz":165,"state":"applied"}}
+```
+
+```json
+{"version":1,"id":"auto-off","method":"display.auto.set","params":{"enabled":false}}
+{"version":1,"id":"auto-off","ok":true,"result":{"enabled":false,"onAc":true,"currentHz":165,"state":"applied"}}
+```
+
+These responses illustrate a panel supporting 60/165 Hz; actual Hz follow the existing policy and advertised modes. `enabled` reports the saved preference, not proof that the last change succeeded. `onAc` is true for AC, false for battery, and null when no power manager is available. `currentHz` is null when the backend cannot read a refresh rate. Status combines separate reads and is not atomic with power changes or UI actions.
+
+Enabling always calls the existing `App.AutoScreen()`, including when already enabled. That method owns the AC/battery selection and Panel Overdrive behavior; IPC introduces no separate switching algorithm. It now returns whether refresh readback matches its selected target. A failed or unavailable refresh readback returns `ok:true` with `state:failed` while leaving `enabled:true` saved for later power/resume events. Panel Overdrive writes are not independently verified by this result. Exceptions use the existing sanitized `internal_error` envelope; settings already saved are not rolled back. Disabling only saves the preference and does not call `AutoScreen()` or write refresh/overdrive settings.
+
+Manual `display.set` disables Auto after request validation, native-backend checks, and advertised-rate validation, even if the subsequent modeset fails. Invalid or unsupported manual requests leave Auto unchanged. The existing `display.set` response shape is preserved; query `display.auto.get` for the preference. `display.get` and `display.brightness.set` retain their existing contracts, and changing brightness does not disable Auto.
+
+`enabled` is required and accepts only JSON `true` / `false`. Missing, null, numeric, string, array/object, duplicate or extra parameters return `invalid_request` without dispatch. `display.auto.get` accepts no parameters. Auto calls use the same worker-thread adapter and router serialization as other hardware operations; concurrent IPC requests return `busy`. Native screen UI refreshes are posted through the UI dispatcher.
+
 Monitoring shares the tray temperature reader and honors dGPU idle/monitoring preferences. A null GPU temperature may intentionally avoid waking the GPU; the existing AMD iGPU fallback can provide the GPU reading. Status is a collection of controller reads, not an atomic snapshot across UI/automatic activity. Poll conservatively (e.g. every three seconds) and back off on `busy`.
 
 ## Example client and all methods
@@ -90,6 +119,9 @@ python3 tools/ghelper-ipc.py gpu.set '{"mode":"standard"}'
 python3 tools/ghelper-ipc.py gpu.set '{"mode":"optimized"}'
 python3 tools/ghelper-ipc.py gpu.set '{"mode":"ultimate"}'
 python3 tools/ghelper-ipc.py display.get
+python3 tools/ghelper-ipc.py display.auto.get
+python3 tools/ghelper-ipc.py display.auto.set '{"enabled":true}'
+python3 tools/ghelper-ipc.py display.auto.set '{"enabled":false}'
 python3 tools/ghelper-ipc.py display.set "{\"hz\":${HZ}}"
 python3 tools/ghelper-ipc.py display.brightness.set '{"percent":50}'
 python3 tools/ghelper-ipc.py battery.get
@@ -131,6 +163,6 @@ After reviewing and intentionally deciding to replace the installed version, fol
 
 ## Verification limits
 
-Automated tests cover strict parsing, validation, legacy aliases, IDs, errors, busy serialization, adapter outcome mapping, capability gates, readback failures, Unix socket permissions, fragmented frames, invalid encoding, and oversized frames. Adapter tests link production adapter code against mock application services; the existing scenario suite separately exercises the real GPU controller with mocked hardware. No hardware-changing command was run for this implementation. Real GPU/MUX/reboot transitions, display refresh under Niri/Wayland, battery firmware, and physical sensors require explicit hardware testing. Prior Silent/Balanced hardware testing reported by the repository owner does not verify this new implementation.
+Automated tests cover strict parsing, validation, legacy aliases, IDs, errors, busy serialization, adapter outcome mapping, capability gates, Auto parameter validation, AutoScreen delegation, disable-without-modeset, manual refresh disabling Auto, off-caller-thread display work, readback failures, Unix socket permissions, fragmented frames, invalid encoding, and oversized frames. Adapter tests link production adapter code against mock application services; the existing scenario suite separately exercises the real GPU controller with mocked hardware. No hardware-changing command was run for this implementation. Real GPU/MUX/reboot transitions, display refresh under Niri/Wayland, battery firmware, and physical sensors require explicit hardware testing. Prior Silent/Balanced hardware testing reported by the repository owner does not verify this new implementation.
 
-Development verification used .NET SDK 10.0.403: the managed Debug build and the default Release build succeeded. `dotnet build` with the default AOT-enabled project settings was checked; a native `dotnet publish` and the full packaging script were not run. IPC tests passed 78 checks, the repository regression suite passed 163 checks, and the Python client passed four mock-server tests. No installation or restart was performed.
+Auto-refresh IPC verification used .NET SDK 10.0.403: the managed Debug build succeeded with zero warnings/errors. IPC tests passed 157 checks, the repository regression suite passed 165 checks, and the Python client passed four mock-server tests. IPC transport tests use temporary Unix sockets and mocked services; Auto adapter tests verify delegation, AC/battery status, unknown readings, failed switches/exceptions, unsupported gates, preference persistence, manual refresh/brightness compatibility, and worker-thread execution. No native publish, packaging, installation, app restart, or real display/overdrive operation was performed for this change.

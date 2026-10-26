@@ -22,6 +22,8 @@ public sealed partial class GHelperIpcControls(Action toggleOsk, Action refreshP
             "gpu.get" => Gpu(),
             "gpu.set" => SetGpu(IpcCommandRouter.String(p, "mode")),
             "display.get" => Display(),
+            "display.auto.get" => DisplayAuto(),
+            "display.auto.set" => SetDisplayAuto(IpcCommandRouter.Boolean(p, "enabled")),
             "display.set" => SetRefresh(p["hz"]!.GetValue<int>()),
             "display.brightness.set" => SetBrightness(p["percent"]!.GetValue<int>()),
             "battery.get" => Battery(),
@@ -37,9 +39,10 @@ public sealed partial class GHelperIpcControls(Action toggleOsk, Action refreshP
     private static JsonObject Capabilities() => new()
     {
         ["version"] = 1, ["gpuModes"] = Strings(GpuModes()),
+        ["displayAuto"] = RefreshSupported && App.Current is App,
         ["displayRefresh"] = RefreshSupported, ["displayScope"] = "primary_panel",
         ["perDisplayEnumeration"] = false, ["batteryChargeLimit"] = (App.Wmi?.GetBatteryChargeLimit() ?? -1) >= 0,
         ["brightness"] = App.Display is LinuxDisplayControl { HasBacklight: true },
-        ["methods"] = Strings(["capabilities.get", "performance.get", "performance.set", "gpu.get", "gpu.set", "display.get", "display.set", "display.brightness.set", "battery.get", "battery.set", "monitoring.get", "osk.toggle"])
+        ["methods"] = Strings(["capabilities.get", "performance.get", "performance.set", "gpu.get", "gpu.set", "display.get", "display.auto.get", "display.auto.set", "display.set", "display.brightness.set", "battery.get", "battery.set", "monitoring.get", "osk.toggle"])
     };
 }

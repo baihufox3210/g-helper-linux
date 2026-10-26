@@ -10,13 +10,33 @@ namespace Avalonia.Threading
 }
 namespace GHelper.Linux
 {
-    public static class App
+    public sealed class App
     {
+        public static App? Current { get; set; } = new();
+        public static MockWindow? MainWindowInstance = new();
+        public int AutoCalls;
+        public int AutoThreadId;
+        public int AutoTargetHz = 165;
+        public Exception? AutoException;
+        public bool AutoScreen(bool init = false)
+        {
+            AutoCalls++;
+            AutoThreadId = Environment.CurrentManagedThreadId;
+            if (AutoException != null) throw AutoException;
+            // Configurable fake outcome; the real application's policy is not duplicated here.
+            Display!.SetRefreshRate(AutoTargetHz);
+            return Display.GetRefreshRate() == AutoTargetHz;
+        }
         public static Mode.ModeControl? Mode = new();
         public static Gpu.GPUModeControl? GpuModeCtrl = new();
         public static Display.LinuxDisplayControl? Display = new();
         public static MockHardware? Wmi = new();
         public static MockPower? Power = new();
+    }
+    public sealed class MockWindow
+    {
+        public int Refreshes;
+        public void RefreshScreenPublic() => Refreshes++;
     }
     public class MockHardware
     {
@@ -39,7 +59,8 @@ namespace GHelper.Linux
     }
     public sealed class MockPower
     {
-        public bool IsOnAcPower() => true;
+        public bool OnAc = true;
+        public bool IsOnAcPower() => OnAc;
         public int GetBatteryPercentage() => 74;
     }
 }
@@ -90,12 +111,21 @@ namespace GHelper.Linux.Display
         public int Hz = 60;
         public int Writes;
         public bool WriteSucceeds = true;
+        public Exception? WriteException;
+        public int WriteThreadId;
         public List<int> Rates = [60, 165];
         public int Brightness = 50;
-        public int GetRefreshRate() => Hz;
+        public bool RefreshReadable = true;
+        public int GetRefreshRate() => RefreshReadable ? Hz : -1;
         public List<int> GetAvailableRefreshRates() => Rates;
         public string GetDisplayName() => "mock-panel";
-        public void SetRefreshRate(int hz) { Writes++; if (WriteSucceeds) Hz = hz; }
+        public void SetRefreshRate(int hz)
+        {
+            Writes++;
+            WriteThreadId = Environment.CurrentManagedThreadId;
+            if (WriteException != null) throw WriteException;
+            if (WriteSucceeds) Hz = hz;
+        }
         public int GetBrightness() => Brightness;
         public void SetBrightness(int value) => Brightness = value;
     }

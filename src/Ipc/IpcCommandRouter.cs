@@ -86,10 +86,11 @@ public sealed class IpcCommandRouter(IIpcControls controls, Action<Exception>? o
                 Only(p, "mode");
                 if (String(p, "mode") is not ("eco" or "standard" or "optimized" or "ultimate")) throw Invalid("Invalid GPU mode");
                 break;
+            case "display.auto.set": Only(p, "enabled"); Boolean(p, "enabled"); break;
             case "display.set": Only(p, "hz"); Integer(p, "hz", 1, 1000); break;
             case "display.brightness.set": Only(p, "percent"); Integer(p, "percent", 4, 100); break;
             case "battery.set": Only(p, "limit"); Integer(p, "limit", 40, 100); break;
-            case "capabilities.get": case "performance.get": case "gpu.get": case "display.get":
+            case "capabilities.get": case "performance.get": case "gpu.get": case "display.get": case "display.auto.get":
             case "battery.get": case "monitoring.get": case "osk.toggle": Only(p); break;
             default: throw new IpcException("unknown_method", "Unknown method");
         }
@@ -112,6 +113,7 @@ public sealed class IpcCommandRouter(IIpcControls controls, Action<Exception>? o
         foreach (var key in p.Select(k => k.Key)) if (!names.Contains(key)) throw Invalid($"Unexpected parameter: {key}");
     }
     public static string String(JsonObject p, string key) => p[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : throw Invalid($"{key} must be a string");
+    public static bool Boolean(JsonObject p, string key) => p[key] is JsonValue v && v.TryGetValue<bool>(out bool value) ? value : throw Invalid($"{key} must be a boolean");
     private static bool TryInt(JsonNode? n, out int value) { value = 0; return n is JsonValue v && v.TryGetValue<int>(out value); }
     public static int Integer(JsonObject p, string key, int min, int max) => TryInt(p[key], out int n) && n >= min && n <= max ? n : throw Invalid($"{key} must be an integer from {min} to {max}");
     private static IpcException Invalid(string message) => new("invalid_request", message);

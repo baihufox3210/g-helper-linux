@@ -359,6 +359,10 @@ cp install/ghelper.desktop ~/.config/autostart/
 
 ---
 
+### IPC control API
+
+External applications can use the user-private `$XDG_RUNTIME_DIR/ghelper.sock` control socket. See [the versioned IPC protocol](docs/IPC.md) for supported controls, safety limits, responses, tests, and the [Python example client](tools/ghelper-ipc.py). Existing plain-text profile commands and `toggle-osk` remain supported. G-Helper retains responsibility for hardware control.
+
 ## `░▒▓█ ╔══[ CONFIGURATION ]══╗ █▓▒░`
 
 ```

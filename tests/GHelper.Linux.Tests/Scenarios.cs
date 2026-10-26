@@ -49,6 +49,8 @@ public static class Scenarios
         Wmi_FromUltimate_ClickEco_LatchesMuxFirst_RebootRequired();
         Wmi_MuxZeroLatched_ClickEco_Blocked();
         Wmi_SetGpuEcoThrows_ReturnsFailed_ConfigUnchanged();
+        ScheduleEco_WriteFailure_ReturnsFailed();
+        ScheduleUltimate_MuxFailure_ReturnsFailed();
         Wmi_BlocksPresent_GetCurrentMode_ReturnsEco();
         Wmi_FromStandard_ClickEco_ScheduledTriggerWrittenForBootScript();
 
@@ -796,6 +798,35 @@ public static class Scenarios
 
             AssertEqual(GpuSwitchResult.Failed, result, "result");
             AssertEqual("standard", AppConfig.GetString("gpu_mode") ?? "", "config not changed on failure");
+        });
+
+    static void ScheduleUltimate_MuxFailure_ReturnsFailed()
+        => Scenario(nameof(ScheduleUltimate_MuxFailure_ReturnsFailed), sb =>
+        {
+            AppConfig.Set("gpu_backend", "asus-wmi");
+            AppConfig.Set("gpu_mode", "standard");
+            sb.Wmi.MuxMode = 1;
+            sb.Wmi.ThrowOnSetGpuMuxMode = true;
+            AssertEqual(GpuSwitchResult.Failed, sb.Controller.ScheduleModeForReboot(GpuMode.Ultimate), "MUX failure cannot promise reboot will apply");
+            AssertEqual("standard", AppConfig.GetString("gpu_mode") ?? "", "config preserved");
+        });
+
+    static void ScheduleEco_WriteFailure_ReturnsFailed()
+        => Scenario(nameof(ScheduleEco_WriteFailure_ReturnsFailed), sb =>
+        {
+            AppConfig.Set("gpu_backend", "asus-wmi");
+            AppConfig.Set("gpu_mode", "standard");
+            sb.Wmi.MuxMode = 1;
+            // A directory at the trigger path makes the helper's write fail.
+            Directory.CreateDirectory(sb.TriggerPath);
+            try
+            {
+                var result = sb.Controller.ScheduleModeForReboot(GpuMode.Eco);
+                AssertEqual(GpuSwitchResult.Failed, result, "must not report reboot-ready after failed write");
+                AssertEqual("standard", AppConfig.GetString("gpu_mode") ?? "", "failed scheduling preserves config");
+                Assert(!sb.ModprobePresent(), "partial Eco artifacts removed");
+            }
+            finally { Directory.Delete(sb.TriggerPath, recursive: true); }
         });
 
     static void Wmi_BlocksPresent_GetCurrentMode_ReturnsEco()

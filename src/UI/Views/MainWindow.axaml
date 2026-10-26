@@ -173,6 +173,10 @@
                         </StackPanel>
                     </Button>
 
+                    <Button x:Name="buttonGpuRestart" Classes="ghelper"
+                            IsVisible="False" Margin="0,6,0,0"
+                            Click="ButtonGpuRestart_Click" />
+
                     <TextBlock x:Name="labelTipGPU" Classes="label-dim"
                                Text="" Margin="2,6,2,0" TextWrapping="Wrap" />
                 </StackPanel>

@@ -45,10 +45,10 @@ public class KScreenBackend : IDisplayBackend
 
             // Parse: "Modes:  1:1920x1200@165.00!  2:1920x1200@60.00*"
             // * = current mode, ! = preferred
-            var matches = Regex.Matches(modesText, @"(\d+):(\d+x\d+)@(\d+)(?:\.\d+)?(\*?)");
+            var matches = Regex.Matches(modesText, @"(\d+):(\d+x\d+)@(\d+)(?:\.\d+)?([!*]*)");
             foreach (Match m in matches)
             {
-                if (m.Groups[4].Value == "*")
+                if (m.Groups[4].Value.Contains('*'))
                 {
                     if (int.TryParse(m.Groups[3].Value, out int hz))
                         return hz;
@@ -84,10 +84,10 @@ public class KScreenBackend : IDisplayBackend
 
             // Find current mode's resolution (marked with *)
             string? currentRes = null;
-            var matches = Regex.Matches(modesText, @"\d+:(\d+x\d+)@(\d+)(?:\.\d+)?(\*?)");
+            var matches = Regex.Matches(modesText, @"\d+:(\d+x\d+)@(\d+)(?:\.\d+)?([!*]*)");
             foreach (Match m in matches)
             {
-                if (m.Groups[3].Value == "*")
+                if (m.Groups[3].Value.Contains('*'))
                 {
                     currentRes = m.Groups[1].Value;
                     break;
@@ -170,7 +170,7 @@ public class KScreenBackend : IDisplayBackend
 
             // Find current resolution (marked with *)
             string? currentRes = null;
-            var currentMatch = Regex.Match(modesText, @"\d+:(\d+x\d+)@\d+(?:\.\d+)?\*");
+            var currentMatch = Regex.Match(modesText, @"\d+:(\d+x\d+)@\d+(?:\.\d+)?[!*]*\*");
             if (currentMatch.Success)
                 currentRes = currentMatch.Groups[1].Value;
 

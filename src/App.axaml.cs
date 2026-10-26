@@ -665,7 +665,8 @@ public class App : Application
 
         if (onAc)
         {
-            int maxHz = rates.Count > 0 ? rates[0] : 120;
+            int maxHz = rates.Count > 0 ? rates.Max() : 0;
+            if (maxHz <= 0) return;
             display.SetRefreshRate(maxHz);
             Wmi?.SetPanelOverdrive(true);
             AppConfig.Set("panel_od", 1);
@@ -675,12 +676,14 @@ public class App : Application
         }
         else
         {
-            display.SetRefreshRate(60);
+            int lowHz = rates.Contains(60) ? 60 : (rates.Count > 0 ? rates.Min() : 0);
+            if (lowHz <= 0) return;
+            display.SetRefreshRate(lowHz);
             Wmi?.SetPanelOverdrive(false);
             AppConfig.Set("panel_od", 0);
-            Logger.WriteLine("AutoScreen: Battery -> 60Hz + overdrive OFF");
+            Logger.WriteLine($"AutoScreen: Battery -> {lowHz}Hz + overdrive OFF");
             if (!init)
-                System?.ShowNotification(Labels.Get("display"), Labels.Get("auto_screen_battery"), "video-display");
+                System?.ShowNotification(Labels.Get("display"), Labels.Format("auto_screen_battery_rate", lowHz), "video-display");
         }
 
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -1070,9 +1073,11 @@ public class App : Application
 
                 case GpuSwitchResult.DriverBlocking:
                     // Tray menu can't show a dialog - auto-schedule for reboot
-                    GpuModeCtrl.ScheduleModeForReboot(target);
+                    var scheduled = GpuModeCtrl.ScheduleModeForReboot(target);
                     System?.ShowNotification(Labels.Get("gpu_mode"),
-                        Labels.Get("gpu_driver_scheduled"), "system-reboot");
+                        Labels.Get(scheduled == GpuSwitchResult.RebootRequired ? "gpu_driver_scheduled"
+                            : scheduled == GpuSwitchResult.EcoBlocked ? "gpu_eco_blocked_mux" : "gpu_switch_failed"),
+                        scheduled == GpuSwitchResult.RebootRequired ? "system-reboot" : "dialog-error");
                     break;
 
                 case GpuSwitchResult.Deferred:
@@ -1183,10 +1188,8 @@ public class App : Application
             Battery.BatteryControl.AutoBattery();
             AnimeMatrix?.SetDevice(true);
 
-            // Restore panel overdrive from saved config.
-            int savedOd = AppConfig.Get("panel_od", -1);
-            if (savedOd >= 0)
-                Wmi?.SetPanelOverdrive(savedOd == 1);
+            // Re-evaluate AC state after suspend, including refresh rate and overdrive.
+            AutoScreen(init: true);
 
             // Restore keyboard brightness (firmware may reset on suspend).
             try

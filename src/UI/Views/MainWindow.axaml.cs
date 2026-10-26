@@ -556,6 +556,9 @@ public partial class MainWindow : Window
 
         UpdateGpuButtons();
 
+        buttonGpuRestart.Content = Labels.Get("restart_to_apply");
+        buttonGpuRestart.IsVisible = gpu?.IsPendingReboot() == true;
+
         // GPU tip - check for pending reboot first
         if (gpu?.IsPendingReboot() == true)
         {
@@ -638,9 +641,7 @@ public partial class MainWindow : Window
         {
             // A hardware switch is blocking (buttons should be locked, but be defensive).
             // Save the user's latest choice so it wins after reboot.
-            gpu.ScheduleModeForReboot(target);
-            _currentGpuMode = (int)target;
-            UpdateGpuButtons();
+            ScheduleGpuModeForReboot(target);
             return;
         }
 
@@ -662,8 +663,77 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Handle GpuSwitchResult on the UI thread - show notifications, update tips, show dialogs.
+    /// Schedule on a worker thread and report the controller result to the UI.
     /// </summary>
+    private void ScheduleGpuModeForReboot(GpuMode target)
+    {
+        var gpu = App.GpuModeCtrl;
+        if (gpu == null) return;
+        LockGpuButtons(Labels.Get("gpu_switching_generic"));
+        Task.Run(() =>
+        {
+            GpuSwitchResult result;
+            try { result = gpu.ScheduleModeForReboot(target); }
+            catch (Exception ex)
+            {
+                Helpers.Logger.WriteLine("GPU reboot scheduling failed", ex);
+                result = GpuSwitchResult.Failed;
+            }
+            Dispatcher.UIThread.Post(() =>
+            {
+                UnlockGpuButtons();
+                HandleGpuSwitchResult(result, target);
+            });
+        });
+    }
+
+    private async void ButtonGpuRestart_Click(object? sender, RoutedEventArgs e)
+    {
+        var dialog = new Window
+        {
+            Title = Labels.Get("restart_to_apply"), Width = 420,
+            SizeToContent = SizeToContent.Height, CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        var content = new StackPanel { Margin = new Avalonia.Thickness(20), Spacing = 16 };
+        content.Children.Add(new TextBlock
+        {
+            Text = Labels.Get("gpu_restart_confirm"), TextWrapping = TextWrapping.Wrap
+        });
+        var buttons = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 12 };
+        var restart = new Button { Content = Labels.Get("restart_to_apply") };
+        var cancel = new Button { Content = Labels.Get("cancel") };
+        restart.Click += (_, _) => dialog.Close(true);
+        cancel.Click += (_, _) => dialog.Close(false);
+        buttons.Children.Add(restart);
+        buttons.Children.Add(cancel);
+        content.Children.Add(buttons);
+        dialog.Content = content;
+        if (!await dialog.ShowDialog<bool>(this)) return;
+        buttonGpuRestart.IsEnabled = false;
+        try
+        {
+            int exitCode = await Task.Run(() =>
+            {
+                using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "systemctl", Arguments = "reboot", UseShellExecute = false
+                });
+                if (process == null) return -1;
+                process.WaitForExit();
+                return process.ExitCode;
+            });
+            if (exitCode != 0)
+                App.System?.ShowNotification(Labels.Get("gpu_mode"), Labels.Get("gpu_restart_failed"), "dialog-error");
+        }
+        catch (Exception ex)
+        {
+            Helpers.Logger.WriteLine("GPU restart failed", ex);
+            App.System?.ShowNotification(Labels.Get("gpu_mode"), Labels.Get("gpu_restart_failed"), "dialog-error");
+        }
+        finally { buttonGpuRestart.IsEnabled = true; }
+    }
+
     private void HandleGpuSwitchResult(GpuSwitchResult result, GpuMode target)
     {
         RefreshGpuMode();
@@ -1023,11 +1093,7 @@ public partial class MainWindow : Window
         btnAfterReboot.Click += (_, _) =>
         {
             dialog.Close();
-            App.GpuModeCtrl?.ScheduleModeForReboot(target);
-            labelTipGPU.Text = Labels.Get("gpu_eco_pending");
-            RefreshGpuMode();
-            App.System?.ShowNotification(Labels.Get("gpu_mode"),
-                Labels.Get("gpu_eco_after_reboot"), "system-reboot");
+            ScheduleGpuModeForReboot(target);
         };
 
         btnCancel.Click += (_, _) =>
@@ -1107,11 +1173,7 @@ public partial class MainWindow : Window
         if ((App.Wmi?.GetGpuMuxMode() ?? -1) == 0)
         {
             Logger.WriteLine("RunSwitchNowKillFlow: MUX=0 (Ultimate) - refusing live switch, reboot required");
-            App.GpuModeCtrl?.ScheduleModeForReboot(target);
-            labelTipGPU.Text = Labels.Get("gpu_eco_pending");
-            RefreshGpuMode();
-            App.System?.ShowNotification(Labels.Get("gpu_mode"),
-                Labels.Get("gpu_eco_after_reboot"), "system-reboot");
+            ScheduleGpuModeForReboot(target);
             return;
         }
 
@@ -1352,7 +1414,7 @@ public partial class MainWindow : Window
         {
             // Enable auto and apply immediately
             Helpers.AppConfig.Set("screen_auto", 1);
-            (App.Current as App)?.AutoScreen();
+            Task.Run(() => (App.Current as App)?.AutoScreen());
         }
         RefreshScreen();
     }

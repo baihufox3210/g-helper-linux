@@ -241,9 +241,8 @@ public class GPUModeControl
             // This ensures rapid clicks always result in the LAST choice winning.
             Logger.WriteLine($"GPUModeControl: switch in progress, scheduling {target} for reboot");
             var scheduleResult = ScheduleModeForReboot(target);
-            if (scheduleResult == GpuSwitchResult.EcoBlocked)
-                return GpuSwitchResult.EcoBlocked;
-            return GpuSwitchResult.Deferred;
+            return scheduleResult == GpuSwitchResult.RebootRequired
+                ? GpuSwitchResult.Deferred : scheduleResult;
         }
 
         try
@@ -259,7 +258,8 @@ public class GPUModeControl
             // Entering Eco writes the marker so the boot script re-applies Eco.
             // Leaving Eco removes the marker so the boot script won't force Eco.
             // The config/checkbox is NOT touched here (user preference survives).
-            if (IsEcoPersistentConfig())
+            if (IsEcoPersistentConfig() &&
+                result is GpuSwitchResult.Applied or GpuSwitchResult.AlreadySet or GpuSwitchResult.RebootRequired or GpuSwitchResult.Deferred)
                 SyncPersistentMarkerToDisk(target == GpuMode.Eco);
 
             // If the user has the AURA "GPU Mode" color effect selected,
@@ -435,8 +435,6 @@ public class GPUModeControl
             return GpuSwitchResult.EcoBlocked;
         }
 
-        SaveModeToConfig(target);
-
         // If target needs MUX change, latch it now (instant, safe)
         // Use GetEffectiveMux() - if we already latched a MUX change this session,
         // we need to know the LATCHED value, not the stale hardware readback.
@@ -458,9 +456,7 @@ public class GPUModeControl
                 catch (Exception ex)
                 {
                     Logger.WriteLine($"GPUModeControl: ScheduleModeForReboot - failed to exit Eco: {ex.Message}");
-                    // Can't latch MUX, but config is saved - ApplyPendingOnStartup will retry
-                    WriteDriverBlock(target);
-                    return GpuSwitchResult.RebootRequired;
+                    return GpuSwitchResult.Failed;
                 }
             }
 
@@ -475,13 +471,22 @@ public class GPUModeControl
             catch (Exception ex)
             {
                 Logger.WriteLine($"GPUModeControl: ScheduleModeForReboot - MUX write failed: {ex.Message}");
-                // Config is saved - ApplyPendingOnStartup will retry
+                return GpuSwitchResult.Failed;
             }
         }
 
         // Write driver block so Eco can be applied safely after reboot.
         // For non-Eco targets, this removes any stale block artifacts.
         WriteDriverBlock(target);
+        if (target == GpuMode.Eco &&
+            (!File.Exists(TriggerPath) || File.ReadAllText(TriggerPath).Trim() != "eco" ||
+             !File.Exists(ModprobeBlockPath) || !File.Exists(UdevRemovePath)))
+        {
+            Logger.WriteLine("GPUModeControl: Eco scheduling failed - boot artifacts missing");
+            RemoveDriverBlock();
+            return GpuSwitchResult.Failed;
+        }
+        SaveModeToConfig(target);
         return GpuSwitchResult.RebootRequired;
     }
 

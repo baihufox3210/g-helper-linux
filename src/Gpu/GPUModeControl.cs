@@ -39,7 +39,9 @@ public enum GpuSwitchResult
     EcoBlocked,
     /// <summary>dgpu_disable=0 was written but the dGPU did not re-enumerate on the
     /// PCI bus after rescan (slow/stuck firmware). UI should advise a reboot.</summary>
-    DgpuReenableFailed
+    DgpuReenableFailed,
+    /// <summary>Another switch is active; no configuration or hardware was changed.</summary>
+    Busy
 }
 
 /// <summary>
@@ -229,10 +231,11 @@ public class GPUModeControl
     /// NOTE: This may block for 30-60 seconds (dgpu_disable write).
     /// Always call from a background thread (Task.Run), never from the UI thread.
     /// </summary>
-    public GpuSwitchResult RequestModeSwitch(GpuMode target)
+    public GpuSwitchResult RequestModeSwitch(GpuMode target, bool deferIfBusy = true)
     {
         if (!_switchLock.Wait(0))
         {
+            if (!deferIfBusy) return GpuSwitchResult.Busy;
             // A hardware switch is blocking - can't start another.
             // But save the user's latest choice so it applies after reboot.
             // This ensures rapid clicks always result in the LAST choice winning.

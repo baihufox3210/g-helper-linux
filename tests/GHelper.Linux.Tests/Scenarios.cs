@@ -23,6 +23,7 @@ public static class Scenarios
 {
     public static void RunAll()
     {
+        IpcBusy_DoesNotScheduleOrWrite();
         Console.WriteLine("\n PCI backend ");
         Pci_FromStandard_ClickEco_WritesBlocks_AndAppliesLive();
         Pci_FromEco_ClickEco_AlreadySet_NoOp();
@@ -131,6 +132,22 @@ public static class Scenarios
     // Exhaustive cross-product so any future refactor that breaks one
     // combination shows up immediately. Each row is a single Scenario.
     // 
+
+    static void IpcBusy_DoesNotScheduleOrWrite() => Scenario(nameof(IpcBusy_DoesNotScheduleOrWrite), s =>
+    {
+        var gate = (SemaphoreSlim)typeof(GPUModeControl)
+            .GetField("_switchLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(s.Controller)!;
+        gate.Wait();
+        try
+        {
+            var result = s.Controller.RequestModeSwitch(GpuMode.Eco, deferIfBusy: false);
+            Assert(result == GpuSwitchResult.Busy, "busy result");
+            Assert(AppConfig.GetString("gpu_mode") == null, "No mode scheduled while busy");
+            Assert(!File.Exists(Path.Combine(s.TempRoot, "etc/ghelper/pending-gpu-mode")), "No reboot trigger written");
+        }
+        finally { gate.Release(); }
+    });
 
     enum HwState { Standard, Eco, Ultimate }
 

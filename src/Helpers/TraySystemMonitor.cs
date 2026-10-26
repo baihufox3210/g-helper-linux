@@ -224,15 +224,11 @@ public static class TraySystemMonitor
     // 
 
     /// <summary>
-    /// Single-tick driver. Reads CPU/GPU temps once, updates whichever
-    /// surfaces are active. Robust to sysfs hiccups (EAGAIN/ENODEV during
-    /// driver hotplug, suspend/resume) - falls back to "--" placeholder
-    /// rather than letting the timer die.
+    /// Shared temperature reader for tray and IPC. Preserves dGPU idle and
+    /// monitoring preferences; unavailable readings are negative.
     /// </summary>
-    private static void Tick()
+    public static (int Cpu, int Gpu) ReadTemperatures()
     {
-        App.RefreshTrayDgpuStatus();
-
         int cpuTemp = -1;
         int gpuTemp = -1;
         try
@@ -259,6 +255,15 @@ public static class TraySystemMonitor
             if (igpu != null)
                 gpuTemp = igpu.Value;
         }
+
+        return (cpuTemp, gpuTemp);
+    }
+
+    private static void Tick()
+    {
+        App.RefreshTrayDgpuStatus();
+
+        var (cpuTemp, gpuTemp) = ReadTemperatures();
 
         // Surface 1: tooltip on main icon.
         PushTooltip(BuildTooltipBody(cpuTemp, gpuTemp));

@@ -203,11 +203,13 @@ public class App : Application
 
             // Command socket for follow-up "ghelper --osk" invocations, and
             // the keyboard itself when this startup was osk-initiated.
-            CommandIpc.StartServer(cmd =>
-            {
-                if (cmd == "toggle-osk")
-                    Avalonia.Threading.Dispatcher.UIThread.Post(ToggleOskWindow);
-            });
+            var ipcRouter = new GHelper.Linux.Ipc.IpcCommandRouter(
+                new GHelper.Linux.Ipc.GHelperIpcControls(ToggleOskWindow, () =>
+                {
+                    UpdateTrayIcon();
+                    MainWindowInstance?.RefreshPerformanceMode();
+                }), ex => Logger.WriteLine("IPC dispatch failed", ex));
+            CommandIpc.StartServer(ipcRouter.HandleAsync);
             if (oskStart)
                 Avalonia.Threading.Dispatcher.UIThread.Post(ToggleOskWindow);
 

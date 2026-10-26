@@ -75,7 +75,10 @@ public static class BatteryControl
     /// </summary>
     /// <param name="limit">Desired limit (40-100). -1 to re-read from config.</param>
     /// <returns>The actual limit applied (firmware may clamp).</returns>
-    public static int SetBatteryChargeLimit(int limit = -1)
+    public static int SetBatteryChargeLimit(int limit = -1) => SetBatteryChargeLimit(limit, out _);
+
+    /// <summary>Apply the same validation and persistence, retaining the hardware write result.</summary>
+    public static int SetBatteryChargeLimit(int limit, out bool writeSucceeded)
     {
         if (limit < 0)
             limit = AppConfig.Get(KeyChargeLimit, 100);
@@ -102,6 +105,7 @@ public static class BatteryControl
         }
 
         bool ok = App.Wmi?.SetBatteryChargeLimit(limit) ?? false;
+        writeSucceeded = ok;
 
         if (ok)
         {

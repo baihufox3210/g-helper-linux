@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Ipc/*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../../src/Battery/BatteryControl.cs" Link="BatteryControl.cs" />
+    <Compile Include="../../src/Helpers/CommandIpc.cs" Link="CommandIpc.cs" />
+  </ItemGroup>
+</Project>
